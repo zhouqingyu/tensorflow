@@ -19,17 +19,25 @@ limitations under the License.
 namespace tensorflow {
 
 // EXPERIMENTAL: tfdbg debugger-inserted ops.
+// These ops are used only internally by tfdbg. There is no API for users to
+// direct create them. Users can create them indirectly by using
+// RunOptions.debug_options during Session::Run() call. See tfdbg documentation
+// for more details.
 REGISTER_OP("Copy")
     .Input("input: T")
     .Output("output: T")
     .Attr("T: type")
     .Attr("tensor_name: string = ''")
+    .Attr("debug_ops_spec: list(string) = []")
     .SetAllowsUninitializedInput()
     .Doc(R"doc(
 Copy Op.
 
 Performs CPU-to-CPU or GPU-to-GPU deep-copying of tensor, depending on the
 device on which the tensor is allocated.
+N.B.: If the all downstream attached debug ops are disabled given the current
+gRPC gating status, the output will simply forward the input tensor without
+deep-copying. See the documentation of Debug* ops for more details.
 
 Unlike the CopyHost Op, this op does not have HostMemory constraint on its
 input or output.
@@ -37,6 +45,11 @@ input or output.
 input: Input tensor.
 output: Output tensor, deep-copied from input.
 tensor_name: The name of the input tensor.
+debug_ops_spec: A list of debug op spec (op, url, gated_grpc) for attached debug
+  ops. Each element of the list has the format
+  <debug_op>;<grpc_url>;<gated_grpc>, wherein gated_grpc is boolean represented
+  as 0/1. E.g., "DebugIdentity;grpc://foo:3333;1",
+  "DebugIdentity;file:///tmp/tfdbg_1;0".
 )doc");
 
 REGISTER_OP("CopyHost")
@@ -44,23 +57,33 @@ REGISTER_OP("CopyHost")
     .Output("output: T")
     .Attr("T: type")
     .Attr("tensor_name: string = ''")
+    .Attr("debug_ops_spec: list(string) = []")
     .SetAllowsUninitializedInput()
     .Doc(R"doc(
 Copy Host Op.
 
 Performs CPU-to-CPU deep-copying of tensor.
+N.B.: If the all downstream attached debug ops are disabled given the current
+gRPC gating status, the output will simply forward the input tensor without
+deep-copying. See the documentation of Debug* ops for more details.
 
 Unlike the Copy Op, this op has HostMemory constraint on its input or output.
 
 input: Input tensor.
 output: Output tensor, deep-copied from input.
 tensor_name: The name of the input tensor.
+debug_ops_spec: A list of debug op spec (op, url, gated_grpc) for attached debug
+  ops. Each element of the list has the format
+  <debug_op>;<grpc_url>;<gated_grpc>, wherein gated_grpc is boolean represented
+  as 0/1. E.g., "DebugIdentity;grpc://foo:3333;1",
+  "DebugIdentity;file:///tmp/tfdbg_1;0".
 )doc");
 
 REGISTER_OP("DebugIdentity")
     .Input("input: T")
     .Output("output: T")
     .Attr("T: type")
+    .Attr("device_name: string = ''")
     .Attr("tensor_name: string = ''")
     .Attr("debug_urls: list(string) = []")
     .Attr("gated_grpc: bool = false")
@@ -87,6 +110,7 @@ REGISTER_OP("DebugNanCount")
     .Input("input: T")
     .Output("output: int64")  // The debug signal (nan count) is int64
     .Attr("T: type")
+    .Attr("device_name: string = ''")
     .Attr("tensor_name: string = ''")
     .Attr("debug_urls: list(string) = []")
     .Attr("gated_grpc: bool = false")
@@ -113,6 +137,7 @@ REGISTER_OP("DebugNumericSummary")
     .Input("input: T")
     .Output("output: double")
     .Attr("T: type")
+    .Attr("device_name: string = ''")
     .Attr("tensor_name: string = ''")
     .Attr("debug_urls: list(string) = []")
     .Attr("lower_bound: float = -inf")
@@ -126,7 +151,8 @@ Debug Numeric Summary Op.
 Provide a basic summary of numeric value types, range and distribution.
 
 input: Input tensor, non-Reference type, float or double.
-output: A double tensor of shape [12], the elements of which are:
+output: A double tensor of shape [14 + nDimensions], where nDimensions is the
+  the number of dimensions of the tensor's shape. The elements of output are:
   [0]: is initialized (1.0) or not (0.0).
   [1]: total number of elements
   [2]: NaN element count
@@ -148,6 +174,10 @@ Output elements [1:8] are all zero, if the tensor is uninitialized.
         If uninitialized or no such element exists: NaN.
   [11]: variance of all non-inf and non-NaN elements.
         If uninitialized or no such element exists: NaN.
+  [12]: Data type of the tensor encoded as an enum integer. See the DataType
+        proto for more details.
+  [13]: Number of dimensions of the tensor (ndims).
+  [14+]: Sizes of the dimensions.
 
 tensor_name: Name of the input tensor.
 debug_urls: List of URLs to debug targets, e.g.,

@@ -1,3 +1,17 @@
+# Copyright 2017 The TensorFlow Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
 if(WIN32)
   # Windows: build a static library with the same objects as tensorflow.dll.
   # This can be used to build for a standalone exe and also helps us to
@@ -67,6 +81,13 @@ target_link_libraries(tensorflow PRIVATE
     ${tensorflow_EXTERNAL_LIBRARIES}
     tf_protos_cc
 )
+
+# There is a bug in GCC 5 resulting in undefined reference to a __cpu_model function when
+# linking to the tensorflow library. Adding the following libraries fixes it.
+# See issue on github: https://github.com/tensorflow/tensorflow/issues/9593
+if(CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0)
+    target_link_libraries(tensorflow PRIVATE gcc_s gcc)
+endif()
 
 if(WIN32)
   add_dependencies(tensorflow tensorflow_static)

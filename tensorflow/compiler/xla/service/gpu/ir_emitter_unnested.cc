@@ -33,6 +33,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/for_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_to_ir_bindings.h"
+#include "tensorflow/compiler/xla/service/gpu/infeed_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emission_utils.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter_context.h"
@@ -192,11 +193,13 @@ llvm::Function* IrEmitterUnnested::BuildKernelPrototype(
   // the result).  We also know how many bytes can be dereferenced in it.
   const llvm::Argument& temp_buffer = *std::prev(kernel->arg_end());
   int64 temp_buffer_arg_no = temp_buffer.getArgNo();
-  if (const BufferAllocation* allocation =
-          ir_emitter_context_->buffer_assignment().GetTempAllocation()) {
-    kernel->addDereferenceableAttr(temp_buffer_arg_no + 1, allocation->size());
+  int64 temp_allocation_total_size =
+      ir_emitter_context_->buffer_assignment().temp_allocation_total_size();
+  if (temp_allocation_total_size != 0) {
+    kernel->addDereferenceableAttr(temp_buffer_arg_no + 1,
+                                   temp_allocation_total_size);
   }
-  kernel->setDoesNotAlias(temp_buffer_arg_no + 1);
+  kernel->addAttribute(temp_buffer_arg_no + 1, llvm::Attribute::NoAlias);
 
   // Add the declaration of this kernel to llvm.nvvm.annotations so that NVPTX
   // treats it as a CUDA kernel.
@@ -1540,10 +1543,8 @@ Status IrEmitterUnnested::HandleSelectAndScatter(
       .EmitLoop();
 }
 
-Status IrEmitterUnnested::HandleWhile(HloInstruction* xla_while,
-                                      HloInstruction* init,
-                                      HloComputation* condition,
-                                      HloComputation* body) {
+Status IrEmitterUnnested::HandleWhile(HloInstruction* xla_while) {
+  HloComputation* condition = xla_while->while_condition();
   TF_RET_CHECK(ShapeUtil::IsScalar(condition->root_instruction()->shape()) &&
                condition->root_instruction()->shape().element_type() == PRED)
       << "While condition computation must return bool";
@@ -1577,6 +1578,11 @@ Status IrEmitterUnnested::HandleSelect(HloInstruction* select,
                                        HloInstruction* on_false) {
   thunk_sequence_->push_back(BuildKernelThunk(select));
   return IrEmitter::HandleSelect(select, pred, on_true, on_false);
+}
+
+Status IrEmitterUnnested::HandleInfeed(HloInstruction* infeed) {
+  thunk_sequence_->emplace_back(BuildInfeedThunk(infeed));
+  return Status::OK();
 }
 
 llvm::Function* IrEmitterUnnested::EmitBasePointersForHloAndItsOperands(
@@ -1627,6 +1633,7 @@ std::unique_ptr<Thunk> IrEmitterUnnested::BuildKernelThunk(
 
   // Compute the input buffer indices.
   std::vector<BufferAllocation::Slice> io_buffers;
+  io_buffers.reserve(io_hlos.size());
   for (const HloInstruction* io_hlo : io_hlos) {
     io_buffers.push_back(GetAllocationSlice(*LatestNonGteAncestor(io_hlo)));
   }
@@ -1645,6 +1652,17 @@ std::unique_ptr<Thunk> IrEmitterUnnested::BuildCopyThunk(
       /*destination_buffer=*/GetAllocationSlice(*inst),
       /*mem_size=*/
       llvm_ir::ByteSizeOf(operand->shape(),
+                          ir_emitter_context_->llvm_module()->getDataLayout()),
+      inst);
+}
+
+std::unique_ptr<Thunk> IrEmitterUnnested::BuildInfeedThunk(
+    const HloInstruction* inst) {
+  CHECK_EQ(HloOpcode::kInfeed, inst->opcode());
+  return MakeUnique<InfeedThunk>(
+      /*destination_buffer=*/GetAllocationSlice(*inst),
+      /*mem_size=*/
+      llvm_ir::ByteSizeOf(inst->shape(),
                           ir_emitter_context_->llvm_module()->getDataLayout()),
       inst);
 }
@@ -1781,7 +1799,7 @@ namespace {
 Status CheckWhileBuffersShareAllocation(
     const HloInstruction* xla_while,
     const BufferAssignment& buffer_assignment) {
-  return ShapeUtil::ForEachSubshape(
+  return ShapeUtil::ForEachSubshapeWithStatus(
       xla_while->shape(),
       [&buffer_assignment, &xla_while](const Shape& /*subshape*/,
                                        const ShapeIndex& index) -> Status {

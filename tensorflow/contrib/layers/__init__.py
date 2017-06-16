@@ -24,6 +24,7 @@ See the @{$python/contrib.layers} guide.
 @@conv2d_transpose
 @@convolution2d_transpose
 @@dropout
+@@elu
 @@embedding_lookup_unique
 @@flatten
 @@fully_connected
@@ -45,6 +46,7 @@ See the @{$python/contrib.layers} guide.
 @@embed_sequence
 
 @@apply_regularization
+@@l1_l2_regularizer
 @@l1_regularizer
 @@l2_regularizer
 @@sum_regularizer
@@ -99,6 +101,7 @@ from tensorflow.python.util.all_util import remove_undocumented
 
 _allowed_symbols = ['bias_add',
                     'conv2d',
+                    'elu',
                     'feature_column',
                     'legacy_fully_connected',
                     'legacy_linear',

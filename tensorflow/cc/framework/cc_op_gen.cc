@@ -198,7 +198,7 @@ string PrintTensorProto(const TensorProto& proto) {
                          ").AsTensorProto()");
 }
 
-string PrintAttrValue(string op, const AttrValue& attr_value) {
+string PrintAttrValue(const string& op, const AttrValue& attr_value) {
   switch (attr_value.value_case()) {
     case AttrValue::kS:
       return PrintString(attr_value.s());
@@ -730,7 +730,7 @@ void OpInfo::GetOutput(string* out) const {
     // One output, no need for NameRangeMap
     if (is_list_output[0]) {
       strings::StrAppend(out,
-                         "  for (int64 i = 0; i < ret->num_outputs(); ++i)\n");
+                         "  for (int32 i = 0; i < ret->num_outputs(); ++i)\n");
       strings::StrAppend(out, "    this->", output_names[0],
                          ".push_back(Output(ret, i));\n");
     } else {
@@ -740,11 +740,10 @@ void OpInfo::GetOutput(string* out) const {
     return;
   }
   strings::StrAppend(out, "  ::tensorflow::NameRangeMap _outputs_range;\n");
-  strings::StrAppend(
-      out,
-      "  ::tensorflow::Status _status_ = "
-      "::tensorflow::NameRangesForNode(ret->def(), ret->op_def(), "
-      "nullptr, &_outputs_range);\n");
+  strings::StrAppend(out,
+                     "  ::tensorflow::Status _status_ = "
+                     "::tensorflow::NameRangesForNode(*ret, ret->op_def(), "
+                     "nullptr, &_outputs_range);\n");
   strings::StrAppend(out, "  if (!_status_.ok()) {\n", "    ", scope_str,
                      ".UpdateStatus(_status_);\n", "    return;\n");
   strings::StrAppend(out, "  }\n\n");
@@ -753,7 +752,7 @@ void OpInfo::GetOutput(string* out) const {
     const string arg_range = strings::StrCat(
         "_outputs_range[\"", graph_op_def.output_arg(i).name(), "\"]");
     if (is_list_output[i]) {
-      strings::StrAppend(out, "  for (int64 i = ", arg_range, ".first; i < ",
+      strings::StrAppend(out, "  for (int32 i = ", arg_range, ".first; i < ",
                          arg_range, ".second; ++i)\n");
       strings::StrAppend(out, "    this->", output_names[i],
                          ".push_back(Output(ret, i));\n");

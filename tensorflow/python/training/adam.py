@@ -23,7 +23,7 @@ from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
-from tensorflow.python.ops import variables
+from tensorflow.python.ops import variable_scope
 from tensorflow.python.training import optimizer
 from tensorflow.python.training import training_ops
 
@@ -61,7 +61,10 @@ class AdamOptimizer(optimizer.Optimizer):
 
     The default value of 1e-8 for epsilon might not be a good default in
     general. For example, when training an Inception network on ImageNet a
-    current good choice is 1.0 or 0.1.
+    current good choice is 1.0 or 0.1. Note that since AdamOptimizer uses the
+    formulation just before Section 2.1 of the Kingma and Ba paper rather than
+    the formulation in Algorithm 1, the "epsilon" referred to here is "epsilon
+    hat" in the paper.
 
     The sparse implementation of this algorithm (used when the gradient is an
     IndexedSlices object, typically because of `tf.gather` or an embedding
@@ -78,7 +81,9 @@ class AdamOptimizer(optimizer.Optimizer):
         The exponential decay rate for the 1st moment estimates.
       beta2: A float value or a constant float tensor.
         The exponential decay rate for the 2nd moment estimates.
-      epsilon: A small constant for numerical stability.
+      epsilon: A small constant for numerical stability. This epsilon is
+        "epsilon hat" in the Kingma and Ba paper (in the formula just before
+        Section 2.1), not the epsilon in Algorithm 1 of the paper.
       use_locking: If True use locks for update operations.
       name: Optional name for the operations created when applying gradients.
         Defaults to "Adam".
@@ -108,16 +113,20 @@ class AdamOptimizer(optimizer.Optimizer):
 
   def _create_slots(self, var_list):
     # Create the beta1 and beta2 accumulators on the same device as the first
-    # variable.
+    # variable. Sort the var_list to make sure this device is consistent across
+    # workers (these need to go on the same PS, otherwise some updates are
+    # silently ignored).
+    first_var = min(var_list, key=lambda x: x.name)
+
     if (self._beta1_power is None or
-        self._beta1_power.graph is not var_list[0].graph):
-      with ops.colocate_with(var_list[0]):
-        self._beta1_power = variables.Variable(self._beta1,
-                                               name="beta1_power",
-                                               trainable=False)
-        self._beta2_power = variables.Variable(self._beta2,
-                                               name="beta2_power",
-                                               trainable=False)
+        self._beta1_power.graph is not first_var.graph):
+      with ops.colocate_with(first_var):
+        self._beta1_power = variable_scope.variable(self._beta1,
+                                                    name="beta1_power",
+                                                    trainable=False)
+        self._beta2_power = variable_scope.variable(self._beta2,
+                                                    name="beta2_power",
+                                                    trainable=False)
     # Create slots for the first and second moments.
     for v in var_list:
       self._zeros_slot(v, "m", self._name)

@@ -27,7 +27,6 @@ import argparse
 import copy
 import re
 
-import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
 from tensorflow.python.debug.cli import cli_shared
@@ -369,7 +368,7 @@ class DebugAnalyzer(object):
   def add_tensor_filter(self, filter_name, filter_callable):
     """Add a tensor filter.
 
-    A tensor filter is a named callable of the siganture:
+    A tensor filter is a named callable of the signature:
       filter_callable(dump_datum, tensor),
 
     wherein dump_datum is an instance of debug_data.DebugTensorDatum carrying
@@ -1019,12 +1018,8 @@ class DebugAnalyzer(object):
         do_dumped_tensors=parsed.tensors,
         min_line=parsed.line_begin)
 
-    with open(parsed.source_file_path, "rU") as f:
-      source_text = f.read()
-
-    source_lines = source_text.split("\n")
-    num_lines = len(source_lines)
-    line_num_width = int(np.ceil(np.log10(num_lines))) + 3
+    source_lines, line_num_width = source_utils.load_source(
+        parsed.source_file_path)
 
     labeled_source_lines = []
     if parsed.line_begin > 1:
@@ -1050,6 +1045,8 @@ class DebugAnalyzer(object):
         sorted_elements = sorted(source_annotation[i + parsed.line_begin])
         for k, element in enumerate(sorted_elements):
           if k >= parsed.max_elements_per_line:
+            # TODO(cais): Replace this accordion pattern with the easier-to-use
+            # INIT_SCROLL_POS_KEY.
             omitted_info_line = RL("    (... Omitted %d of %d %s ...) " % (
                 len(sorted_elements) - parsed.max_elements_per_line,
                 len(sorted_elements),
@@ -1128,19 +1125,23 @@ class DebugAnalyzer(object):
 
     lines.append(head)
 
-    for item in source_list:
-      path_attributes = [debugger_cli_common.MenuItem(
-          None, "ps %s -b %d" % (item[0], item[5])), color]
+    for (file_path, _, num_nodes, num_tensors, num_dumps,
+         first_line_num) in source_list:
+      path_attributes = [color]
+      if source_utils.is_extension_uncompiled_python_source(file_path):
+        path_attributes.append(
+            debugger_cli_common.MenuItem(None, "ps %s -b %d" %
+                                         (file_path, first_line_num)))
 
-      line = RL(item[0], path_attributes)
+      line = RL(file_path, path_attributes)
       line += " " * (path_column_width - len(line))
       line += RL(
-          str(item[2]) + " " * (num_nodes_column_width - len(str(item[2]))),
+          str(num_nodes) + " " * (num_nodes_column_width - len(str(num_nodes))),
           color)
       line += RL(
-          str(item[3]) + " " * (num_tensors_column_width - len(str(item[3]))),
-          color)
-      line += RL(str(item[4]), color)
+          str(num_tensors) + " " *
+          (num_tensors_column_width - len(str(num_tensors))), color)
+      line += RL(str(num_dumps), color)
       lines.append(line)
     lines.append(RL())
 
